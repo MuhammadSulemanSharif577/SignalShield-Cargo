@@ -5,7 +5,7 @@ class ApiConfig {
     defaultValue: 'http://10.0.2.2:8000',
   );
 
-  static const String registerEndpoint = '/auth/register';
+
 
   static const String loginEndpoint = '/auth/login';
 

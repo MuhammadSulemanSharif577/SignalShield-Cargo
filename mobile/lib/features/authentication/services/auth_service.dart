@@ -44,22 +44,7 @@ class AuthService {
     );
   }
 
-  // SIGN UP
 
-  Future<Map<String, dynamic>> signUp({
-    required String fullName,
-    required String email,
-    required String password,
-  }) async {
-    return _postAndStoreToken(
-      ApiConfig.registerEndpoint,
-      {
-        'full_name': fullName.trim(),
-        'email': email.trim(),
-        'password': password,
-      },
-    );
-  }
 
   // SIGN IN
 

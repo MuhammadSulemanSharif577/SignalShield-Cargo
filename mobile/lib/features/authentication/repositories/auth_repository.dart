@@ -25,23 +25,7 @@ class AuthRepository {
     return UserModel.fromJson(userJson);
   }
 
-  // SIGN UP
 
-  Future<UserModel> signUp({
-    required String fullName,
-    required String email,
-    required String password,
-  }) async {
-    final response = await _service.signUp(
-      fullName: fullName,
-      email: email,
-      password: password,
-    );
-
-    final userJson = response['user'] as Map<String, dynamic>;
-
-    return UserModel.fromJson(userJson);
-  }
 
   // GET CURRENT USER
 
