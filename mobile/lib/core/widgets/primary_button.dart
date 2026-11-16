@@ -1,0 +1,63 @@
+import 'package:flutter/material.dart';
+import '../../app/theme/app_colors.dart';
+
+class PrimaryButton extends StatelessWidget {
+  const PrimaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.isLoading = false,
+    this.icon,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool isLoading;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: isLoading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.6),
+          elevation: 5,
+          shadowColor: AppColors.primary.withValues(alpha: 0.32),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        child: isLoading
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 18),
+                    const SizedBox(width: 8),
+                  ],
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}

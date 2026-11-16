@@ -1,0 +1,29 @@
+# Flutter
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/build/
+mobile/.packages
+mobile/.pub-cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# Environment variables
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
