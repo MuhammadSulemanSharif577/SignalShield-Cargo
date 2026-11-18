@@ -1,50 +1,84 @@
+from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import EmailStr, Field, StringConstraints, field_validator, model_validator
+
+from app.application.schemas import APIModel
+from app.domain.authentication.permissions import PERMISSIONS
+
+Name = Annotated[str, Field(min_length=2, max_length=150)]
+RoleIds = Annotated[list[str], Field(min_length=1)]
+UserStatus = Literal["active", "inactive", "pending"]
 
 
-# REGISTRATION REQUEST
-
-class RegisterRequest(BaseModel):
-
-    full_name: str = Field(min_length=2, max_length=150)
-
+class LoginRequest(APIModel):
     email: EmailStr
+    password: str = Field(min_length=1, max_length=1024)
 
-    password: str = Field(min_length=8, max_length=128)
-
-
-# LOGIN REQUEST
-
-class LoginRequest(BaseModel):
-
-    identifier: EmailStr
-
-    password: str = Field(min_length=1, max_length=128)
-
-    remember_me: bool = False
+    # Passwords are opaque; shared whitespace normalization must not alter them.
+    model_config = {**APIModel.model_config, "str_strip_whitespace": False}
 
 
-# USER RESPONSE
+class SessionUser(APIModel):
+    id: str
+    name: str
+    email: str
 
-class UserResponse(BaseModel):
 
-    id: int
+class SessionResponse(APIModel):
+    token: str
+    expires_at: datetime
+    user: SessionUser
+    role_names: list[str]
+    permissions: list[str]
 
-    full_name: str
 
+class UserInput(APIModel):
+    name: Name
     email: EmailStr
+    role_ids: RoleIds
+    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(
+        min_length=1, max_length=1024, repr=False, json_schema_extra={"writeOnly": True},
+    )
 
-    model_config = ConfigDict(from_attributes=True)
+
+class UserPatch(APIModel):
+    name: Name | None = None
+    email: EmailStr | None = None
+    role_ids: RoleIds | None = None
+    status: UserStatus | None = None
+
+    @model_validator(mode="after")
+    def reject_explicit_null(self):
+        if any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("User fields cannot be null.")
+        return self
 
 
-# AUTHENTICATION RESPONSE
+class UserResponse(APIModel):
+    name: Name
+    email: EmailStr
+    role_ids: list[str]
+    id: str
+    status: UserStatus
+    last_login: datetime | None
 
-class AuthResponse(BaseModel):
 
-    access_token: str
+class RoleInput(APIModel):
+    name: str = Field(min_length=3, max_length=150)
+    description: str = Field(max_length=5000)
+    permissions: list[str] = Field(min_length=1)
 
-    token_type: str = "bearer"
+    @field_validator("permissions")
+    @classmethod
+    def valid_permissions(cls, value):
+        if set(value) - PERMISSIONS:
+            raise ValueError("Unknown permission key.")
+        return sorted(set(value))
 
-    expires_in: int
 
-    user: UserResponse
+class RoleResponse(RoleInput):
+    id: str
+    built_in: bool
+    locked_permissions: list[str]
+    user_count: int

@@ -51,3 +51,8 @@ class UserModel(Base):
         server_default=func.now(),
         nullable=False
     )
+
+    status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

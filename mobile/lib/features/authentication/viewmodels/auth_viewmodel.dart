@@ -44,28 +44,7 @@ class AuthViewModel extends StateNotifier<AsyncValue<UserModel?>> {
     }
   }
 
-  // SIGN UP
-  Future<bool> signUp({
-    required String fullName,
-    required String email,
-    required String password,
-  }) async {
-    state = const AsyncLoading();
 
-    try {
-      final user = await _repository.signUp(
-        fullName: fullName.trim(),
-        email: email.trim(),
-        password: password,
-      );
-
-      state = AsyncData(user);
-      return true;
-    } catch (error, stackTrace) {
-      state = AsyncError(error, stackTrace);
-      return false;
-    }
-  }
 
   // RESTORE CURRENT USER
   Future<void> loadCurrentUser() async {

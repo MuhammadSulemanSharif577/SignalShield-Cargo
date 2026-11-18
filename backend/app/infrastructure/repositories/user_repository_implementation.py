@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 from app.domain.authentication.entities.user import User
 from app.domain.authentication.interfaces.user_repository import UserRepository
 from app.infrastructure.database.models.user_model import UserModel
+from app.infrastructure.database.models.access_model import user_roles
+from app.core.time import aware
+from sqlalchemy import select
 
 
 class SQLAlchemyUserRepository(UserRepository):
@@ -17,7 +20,8 @@ class SQLAlchemyUserRepository(UserRepository):
             full_name=user.full_name,
             email=user.email,
             hashed_password=user.hashed_password,
-            is_active=user.is_active
+            is_active=user.is_active,
+            status=user.status,
         )
 
         try:
@@ -53,8 +57,7 @@ class SQLAlchemyUserRepository(UserRepository):
 
         return self._to_entity(db_user)
 
-    @staticmethod
-    def _to_entity(db_user: UserModel) -> User:
+    def _to_entity(self, db_user: UserModel) -> User:
 
         return User(
             id=db_user.id,
@@ -62,5 +65,10 @@ class SQLAlchemyUserRepository(UserRepository):
             email=db_user.email,
             hashed_password=db_user.hashed_password,
             is_active=db_user.is_active,
-            created_at=db_user.created_at
+            created_at=aware(db_user.created_at),
+            status=db_user.status,
+            last_login=aware(db_user.last_login),
+            role_ids=list(self.db.scalars(select(user_roles.c.role_id).where(user_roles.c.user_id == db_user.id))),
+            failed_logins=db_user.failed_logins,
+            locked_until=aware(db_user.locked_until),
         )
