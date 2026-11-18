@@ -17,7 +17,9 @@ StateNotifierProvider<AuthViewModel, AsyncValue<UserModel?>>((ref) {
 });
 
 class AuthViewModel extends StateNotifier<AsyncValue<UserModel?>> {
-  AuthViewModel(this._repository) : super(const AsyncData(null));
+  AuthViewModel(this._repository) : super(const AsyncLoading()) {
+    loadCurrentUser();
+  }
 
   final AuthRepository _repository;
 
@@ -25,7 +27,6 @@ class AuthViewModel extends StateNotifier<AsyncValue<UserModel?>> {
   Future<bool> signIn({
     required String identifier,
     required String password,
-    required bool keepSessionBound,
   }) async {
     state = const AsyncLoading();
 
@@ -33,13 +34,34 @@ class AuthViewModel extends StateNotifier<AsyncValue<UserModel?>> {
       final user = await _repository.signIn(
         identifier: identifier.trim(),
         password: password,
-        keepSessionBound: keepSessionBound,
       );
 
       state = AsyncData(user);
       return true;
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
+      return false;
+    }
+  }
+
+  Future<bool> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final previous = state;
+    state = const AsyncLoading<UserModel?>().copyWithPrevious(previous);
+    try {
+      final user = await _repository.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+      state = AsyncData(user);
+      return true;
+    } catch (error, stackTrace) {
+      final failure = AsyncError<UserModel?>(error, stackTrace);
+      state = error is AuthApiException && error.statusCode == 401
+          ? failure
+          : failure.copyWithPrevious(previous);
       return false;
     }
   }

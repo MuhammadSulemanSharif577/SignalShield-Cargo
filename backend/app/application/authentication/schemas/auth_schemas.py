@@ -23,6 +23,14 @@ class SessionUser(APIModel):
     id: str
     name: str
     email: str
+    driver_id: str | None = None
+    must_change_password: bool = False
+
+
+class ChangePasswordRequest(APIModel):
+    current_password: str = Field(min_length=1, max_length=1024, repr=False)
+    new_password: str = Field(min_length=1, max_length=1024, repr=False)
+    model_config = {**APIModel.model_config, "str_strip_whitespace": False}
 
 
 class SessionResponse(APIModel):
@@ -62,6 +70,8 @@ class UserResponse(APIModel):
     id: str
     status: UserStatus
     last_login: datetime | None
+    driver_id: str | None
+    must_change_password: bool
 
 
 class RoleInput(APIModel):

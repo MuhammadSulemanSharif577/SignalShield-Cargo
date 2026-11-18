@@ -89,8 +89,8 @@ class FleetService:
             phone=driver.phone if contacts else None,
             email=driver.email if principal.can("drivers:manage", "drivers:credentials") else None,
             status=driver.status,
-            mobile_account=(
-                driver.mobile_account if principal.can("drivers:credentials") else None
+            user_account=(
+                driver.user_account if principal.can("drivers:credentials") else None
             ),
             vehicle_id=driver.vehicle_id,
             vehicle_registration=vehicle.registration if vehicle else None,
@@ -315,10 +315,10 @@ class FleetService:
             raise APIError(
                 409, "rule", "Credentials can only be issued to active drivers."
             )
-        if not reset and driver.mobile_account is not None:
-            raise APIError(409, "conflict", "This driver already has an app login.")
-        if reset and driver.mobile_account is None:
-            raise APIError(404, "not_found", "This driver has no app login.")
+        if not reset and driver.user_account is not None:
+            raise APIError(409, "conflict", "This driver already has a linked user account. Reset its password to restore access.")
+        if reset and driver.user_account is None:
+            raise APIError(404, "not_found", "This driver has no linked user account.")
         try:
             email = EMAIL.validate_python(driver.email).lower()
         except ValidationError:
@@ -334,5 +334,5 @@ class FleetService:
 
     def revoke_credentials(self, driver_id: str):
         self._driver(driver_id, lock=True)
-        self.repository.delete_credentials(driver_id)
+        self.repository.revoke_credentials(driver_id)
         self.repository.commit()

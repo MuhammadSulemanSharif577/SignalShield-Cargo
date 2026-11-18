@@ -2,10 +2,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.time import aware, utcnow
+from app.core.errors import APIError
+from app.domain.authentication.permissions import DRIVER_ROLE_ID
 from app.domain.fleet.entities import Driver, Journey, Vehicle
 from app.infrastructure.database.models.fleet_model import (
-    DriverModel, DriverRecordModel, JourneyModel, MobileAccountModel, VehicleModel,
+    DriverModel, DriverRecordModel, JourneyModel, VehicleModel,
 )
+from app.infrastructure.database.models.user_model import UserModel
+from app.infrastructure.database.models.access_model import SessionModel, user_roles
 
 
 class SQLAlchemyFleetRepository:
@@ -38,15 +42,15 @@ class SQLAlchemyFleetRepository:
         return self._vehicle(model)
 
     def _driver(self, model: DriverModel) -> Driver:
-        account = self.db.get(MobileAccountModel, model.id)
-        mobile_account = None if account is None else {
-            "email": model.email, "active": account.active,
+        account = self.db.get(UserModel, model.user_id) if model.user_id else None
+        user_account = None if account is None else {
+            "id": str(account.id), "email": account.email, "status": account.status,
             "must_change_password": account.must_change_password,
-            "created_at": aware(account.created_at), "last_login_at": aware(account.last_login_at),
+            "created_at": aware(account.created_at), "last_login": aware(account.last_login),
         }
         vehicle_id = self.db.scalar(select(VehicleModel.id).where(VehicleModel.driver_id == model.id))
         return Driver(model.id, model.name, model.phone, model.email, model.status,
-                      mobile_account, vehicle_id, aware(model.updated_at))
+                       user_account, vehicle_id, aware(model.updated_at))
 
     def list_drivers(self) -> list[Driver]:
         return [self._driver(row) for row in self.db.scalars(select(DriverModel).order_by(DriverModel.name))]
@@ -62,11 +66,15 @@ class SQLAlchemyFleetRepository:
             setattr(model, key, getattr(driver, key))
         model.updated_at = utcnow()
         self.db.add(model)
-        account = self.db.get(MobileAccountModel, driver.id)
+        # Fleet changes lock the driver first, then its login identity.
+        account = self.db.scalar(select(UserModel).where(UserModel.id == model.user_id).with_for_update()) if model.user_id else None
         if account:
-            account.active = driver.status == "active"
+            if account.email != driver.email:
+                self._revoke_sessions(account.id)
+            account.full_name, account.email = driver.name, driver.email
             if driver.status != "active":
-                account.credential_version += 1
+                account.status, account.is_active = "inactive", False
+                self._revoke_sessions(account.id)
         self.db.flush()
         return self._driver(model)
 
@@ -97,16 +105,31 @@ class SQLAlchemyFleetRepository:
                 ).order_by(DriverRecordModel.at.desc()))]
 
     def set_credentials(self, driver_id: str, password_hash: str):
-        model = self.db.get(MobileAccountModel, driver_id)
-        if model is None:
-            model = MobileAccountModel(driver_id=driver_id, created_at=utcnow())
+        driver = self.db.get(DriverModel, driver_id)
+        if driver.user_id:
+            account = self.db.scalar(select(UserModel).where(UserModel.id == driver.user_id).with_for_update())
         else:
-            model.credential_version += 1
-        model.password_hash = password_hash
-        model.active = True
-        model.must_change_password = True
-        self.db.add(model)
+            if self.db.scalar(select(UserModel.id).where(UserModel.email == driver.email)):
+                raise APIError(409, "conflict", "This email already belongs to a user account. No accounts were linked or changed.")
+            account = UserModel(full_name=driver.name, email=driver.email, hashed_password=password_hash,
+                                status="active", is_active=True)
+            self.db.add(account)
+            self.db.flush()
+            driver.user_id = account.id
+            self.db.execute(user_roles.insert().values(user_id=account.id, role_id=DRIVER_ROLE_ID))
+        account.hashed_password = password_hash
+        account.status, account.is_active = "active", True
+        account.must_change_password = True
+        account.failed_logins, account.locked_until = 0, None
+        self._revoke_sessions(account.id)
         self.db.flush()
 
-    def delete_credentials(self, driver_id: str):
-        self.db.execute(delete(MobileAccountModel).where(MobileAccountModel.driver_id == driver_id))
+    def _revoke_sessions(self, user_id: int):
+        self.db.execute(delete(SessionModel).where(SessionModel.user_id == user_id))
+
+    def revoke_credentials(self, driver_id: str):
+        driver = self.db.get(DriverModel, driver_id)
+        if driver.user_id:
+            account = self.db.scalar(select(UserModel).where(UserModel.id == driver.user_id).with_for_update())
+            account.status, account.is_active = "inactive", False
+            self._revoke_sessions(account.id)

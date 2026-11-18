@@ -88,12 +88,13 @@ class VehicleView(APIModel):
     current_journey: JourneyRef | None
 
 
-class MobileAccount(APIModel):
-    email: str | None
-    active: bool
+class DriverUserAccount(APIModel):
+    id: str
+    email: str
+    status: Literal["active", "inactive", "pending"]
     must_change_password: bool
     created_at: datetime
-    last_login_at: datetime | None
+    last_login: datetime | None
 
 
 class DriverView(APIModel):
@@ -102,7 +103,7 @@ class DriverView(APIModel):
     phone: str | None
     email: str | None
     status: DriverStatus
-    mobile_account: MobileAccount | None
+    user_account: DriverUserAccount | None
     vehicle_id: str | None
     vehicle_registration: str | None
     current_journey: JourneyRef | None

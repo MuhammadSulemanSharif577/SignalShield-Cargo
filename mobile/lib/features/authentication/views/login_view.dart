@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-
-import '../../../app/routes/route_names.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../core/utils/validators.dart';
 import '../../../core/widgets/primary_button.dart';
@@ -24,7 +21,6 @@ class _LoginViewState extends ConsumerState<LoginView> {
   final _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
-  bool _keepSessionBound = true;
 
   @override
   void dispose() {
@@ -40,14 +36,11 @@ class _LoginViewState extends ConsumerState<LoginView> {
     final success = await ref.read(authViewModelProvider.notifier).signIn(
       identifier: _identifierController.text,
       password: _passwordController.text,
-      keepSessionBound: _keepSessionBound,
     );
 
     if (!mounted) return;
 
-    if (success) {
-      context.go(RouteNames.dashboard);
-    } else {
+    if (!success) {
       final state = ref.read(authViewModelProvider);
       final message = state.hasError
           ? state.error.toString().replaceFirst('Exception: ', '')
@@ -93,15 +86,15 @@ class _LoginViewState extends ConsumerState<LoginView> {
                       const SizedBox(height: 17),
 
                       const TechnicalLabel(
-                        'Operator Identifier / Email',
+                        'Email',
 
                       ),
                       const SizedBox(height: 7),
                       AuthTextField(
                         controller: _identifierController,
-                        hint: 'Enter your terminal ID or email',
+                        hint: 'Enter your account email',
                         icon: Icons.mail_outline_rounded,
-                        validator: Validators.identifier,
+                        validator: Validators.email,
                         keyboardType: TextInputType.emailAddress,
                       ),
                       const SizedBox(height: 15),
@@ -124,54 +117,9 @@ class _LoginViewState extends ConsumerState<LoginView> {
                       ),
                       const SizedBox(height: 10),
 
-                      Row(
-                        children: [
-                          SizedBox(
-                            height: 30,
-                            width: 25,
-                            child: Checkbox(
-                              value: _keepSessionBound,
-                              onChanged: (value) {
-                                setState(() => _keepSessionBound = value ?? false);
-                              },
-                              activeColor: AppColors.primary,
-                              side: const BorderSide(color: AppColors.border),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Text(
-                            'Keep Session Bound',
-                            style: TextStyle(fontSize: 10, color: AppColors.muted),
-                          ),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Password recovery will be added next.'),
-                                ),
-                              );
-                            },
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: const Text(
-                              'Forgot Key?',
-                              style: TextStyle(
-                                color: AppColors.primaryLight,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ),
-                        ],
+                      const Text(
+                        'Use the credentials provided by your administrator. Contact them if you need access or a password reset.',
+                        style: TextStyle(fontSize: 10, color: AppColors.muted),
                       ),
                       const SizedBox(height: 13),
                       PrimaryButton(
@@ -179,30 +127,6 @@ class _LoginViewState extends ConsumerState<LoginView> {
                         icon: Icons.lock_open_rounded,
                         isLoading: isLoading,
                         onPressed: _signIn,
-                      ),
-                      const SizedBox(height: 22),
-                      Center(
-                        child: TextButton(
-                          onPressed: () => context.push(RouteNames.signup),
-                          child: const Text.rich(
-                            TextSpan(
-                              text: "New User? ",
-                              style: TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 11,
-                              ),
-                              children: [
-                                TextSpan(
-                                  text: 'Create Account',
-                                  style: TextStyle(
-                                    color: AppColors.primaryLight,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                       ),
                     ],
                   ),

@@ -6,7 +6,12 @@ import pytest
 from app.core.security import verify_password
 from app.core.time import utcnow
 from app.infrastructure.database.models.dashboard_model import ActivityModel, DeviceIssueModel, RecordingModel, ShipmentModel
-from app.infrastructure.database.models.fleet_model import DriverModel, DriverRecordModel, JourneyModel, MobileAccountModel, VehicleModel
+from app.infrastructure.database.models.fleet_model import DriverModel, DriverRecordModel, JourneyModel, VehicleModel
+from app.infrastructure.database.models.user_model import UserModel
+
+
+def linked_user(db, driver_id):
+    return db.get(UserModel, db.get(DriverModel, driver_id).user_id)
 
 
 @pytest.fixture
@@ -47,7 +52,7 @@ def test_fleet_shapes_assignment_and_persistence(client, fleet):
     assert vehicle["lastLocation"] is None
     assert driver["phone"] == "+1234567890"
     assert driver["availability"] == "available"
-    assert driver["mobileAccount"] is None
+    assert driver["userAccount"] is None
     assert client.get("/api/v1/drivers/assignable", headers=headers).json() == [{"id": driver["id"], "name": driver["name"]}]
     assigned = client.put(f"/api/v1/vehicles/{vehicle['id']}/driver", headers=headers, json={"driverId": driver["id"]})
     assert assigned.status_code == 200, assigned.text
@@ -118,14 +123,14 @@ def test_credentials_only_reveal_temporary_password_on_issue(client, fleet, db_f
     issued = result.json()
     assert set(issued) == {"driver", "email", "temporaryPassword"}
     assert issued["email"] == driver["email"]
-    assert issued["driver"]["mobileAccount"]["email"] == driver["email"]
+    assert issued["driver"]["userAccount"]["email"] == driver["email"]
     assert "username" not in result.text
-    assert issued["driver"]["mobileAccount"]["mustChangePassword"] is True
+    assert issued["driver"]["userAccount"]["mustChangePassword"] is True
     with db_factory() as db:
-        model = db.get(MobileAccountModel, driver["id"])
-        assert verify_password(issued["temporaryPassword"], model.password_hash)
-        assert model.password_hash != issued["temporaryPassword"]
-        version = model.credential_version
+        model = linked_user(db, driver["id"])
+        assert verify_password(issued["temporaryPassword"], model.hashed_password)
+        assert model.hashed_password != issued["temporaryPassword"]
+        user_id = model.id
     assert "temporaryPassword" not in client.get(f"/api/v1/drivers/{driver['id']}", headers=headers).text
     assert client.post(path, headers=headers).status_code == 409
     reset = client.post(path + "/reset-password", headers=headers)
@@ -133,11 +138,13 @@ def test_credentials_only_reveal_temporary_password_on_issue(client, fleet, db_f
     assert reset.json()["temporaryPassword"] != issued["temporaryPassword"]
     assert reset.json()["email"] == driver["email"]
     with db_factory() as db:
-        assert db.get(MobileAccountModel, driver["id"]).credential_version == version + 1
+        assert linked_user(db, driver["id"]).id == user_id
+        assert verify_password(reset.json()["temporaryPassword"], linked_user(db, driver["id"]).hashed_password)
     deleted = client.delete(path, headers=headers)
     assert deleted.status_code == 204 and deleted.content == b""
     assert client.get(f"/api/v1/drivers/{driver['id']}", headers=headers).json()["driver"]["email"] == driver["email"]
-    assert client.post(path + "/reset-password", headers=headers).status_code == 404
+    assert client.get(f"/api/v1/drivers/{driver['id']}", headers=headers).json()["driver"]["userAccount"]["status"] == "inactive"
+    assert client.post(path + "/reset-password", headers=headers).status_code == 200
 
 
 @pytest.mark.parametrize("email", [None, "", " ", "invalid", "driver@"])
@@ -162,16 +169,16 @@ def test_login_uses_saved_email_and_email_changes_preserve_password(client, flee
         assert rejected.json()["code"] == "validation"
     issued = client.post(path + "/credentials", headers=headers).json()
     with db_factory() as db:
-        original_hash = db.get(MobileAccountModel, driver["id"]).password_hash
+        original_hash = linked_user(db, driver["id"]).hashed_password
     result = client.put(path, headers=headers, json={
         "name": driver["name"], "phone": driver["phone"], "email": " New.Login@Example.com ",
     })
     assert result.status_code == 200, result.text
-    assert result.json()["email"] == result.json()["mobileAccount"]["email"] == "new.login@example.com"
-    assert client.get(path, headers=headers).json()["driver"]["mobileAccount"]["email"] == "new.login@example.com"
-    assert client.get("/api/v1/drivers", headers=headers).json()[0]["mobileAccount"]["email"] == "new.login@example.com"
+    assert result.json()["email"] == result.json()["userAccount"]["email"] == "new.login@example.com"
+    assert client.get(path, headers=headers).json()["driver"]["userAccount"]["email"] == "new.login@example.com"
+    assert client.get("/api/v1/drivers", headers=headers).json()[0]["userAccount"]["email"] == "new.login@example.com"
     with db_factory() as db:
-        assert db.get(MobileAccountModel, driver["id"]).password_hash == original_hash
+        assert linked_user(db, driver["id"]).hashed_password == original_hash
         assert verify_password(issued["temporaryPassword"], original_hash)
         assert db.query(DriverModel).filter_by(email=driver["email"]).first() is None
         assert db.query(DriverModel).filter_by(email="new.login@example.com").one().id == driver["id"]
@@ -194,9 +201,9 @@ def test_driver_email_conflict_rolls_back_record_and_login(client, fleet, db_fac
     assert response.status_code == 409 and response.json()["code"] == "conflict"
     persisted = client.get(path, headers=headers).json()["driver"]
     assert persisted["name"] == driver["name"]
-    assert persisted["email"] == persisted["mobileAccount"]["email"] == driver["email"]
+    assert persisted["email"] == persisted["userAccount"]["email"] == driver["email"]
     with db_factory() as db:
-        assert verify_password(issued["temporaryPassword"], db.get(MobileAccountModel, driver["id"]).password_hash)
+        assert verify_password(issued["temporaryPassword"], linked_user(db, driver["id"]).hashed_password)
 
 
 def test_inactive_driver_cannot_create_or_reset_login(client, fleet):
@@ -217,7 +224,7 @@ def test_invalid_persisted_email_cannot_issue_credentials(client, fleet, db_fact
     response = client.post(path, headers=headers)
     assert response.status_code == 422 and response.json()["code"] == "validation"
     with db_factory() as db:
-        assert db.get(MobileAccountModel, driver["id"]) is None
+        assert db.get(DriverModel, driver["id"]).user_id is None
 
 
 def test_credential_permission_can_read_login_email_but_not_phone(client, fleet, make_user, login_headers):
@@ -229,14 +236,14 @@ def test_credential_permission_can_read_login_email_but_not_phone(client, fleet,
     assert detail["email"] == driver["email"] and detail["phone"] is None
     issued = client.post(path + "/credentials", headers=headers)
     assert issued.status_code == 201, issued.text
-    assert issued.json()["email"] == issued.json()["driver"]["mobileAccount"]["email"] == driver["email"]
+    assert issued.json()["email"] == issued.json()["driver"]["userAccount"]["email"] == driver["email"]
     user, _ = make_user(["drivers:view"])
     restricted = login_headers(user)
     for record in (
         client.get(path, headers=restricted).json()["driver"],
         client.get("/api/v1/drivers", headers=restricted).json()[0],
     ):
-        assert record["email"] is None and record["mobileAccount"] is None
+        assert record["email"] is None and record["userAccount"] is None
     assert client.delete(path + "/credentials", headers=admin_headers).status_code == 204
 
 
@@ -251,7 +258,7 @@ def test_fleet_view_permissions_and_redaction(client, fleet, make_user, login_he
     headers = login_headers(user)
     details = client.get(f"/api/v1/drivers/{driver['id']}", headers=headers).json()
     assert details["driver"]["phone"] is None and details["driver"]["email"] is None
-    assert details["driver"]["mobileAccount"] is None
+    assert details["driver"]["userAccount"] is None
     assert details["driver"]["currentJourney"] is None and details["history"] == []
     details = client.get(f"/api/v1/vehicles/{vehicle['id']}", headers=headers).json()
     assert details["vehicle"]["lastLocation"] is None and details["history"] == []

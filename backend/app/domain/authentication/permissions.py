@@ -1,6 +1,9 @@
 """Backend-owned permission keys shared by authorization and role validation."""
 
+DRIVER_ROLE_ID = "builtin-driver"
+
 PERMISSIONS = frozenset({
+    "driver:access",
     "dashboard:view", "tracking:view",
     "users:view", "users:manage",
     "roles:manage", "settings:manage", "audit:view",

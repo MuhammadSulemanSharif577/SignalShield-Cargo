@@ -30,12 +30,14 @@ def main():
         parser.error("Passwords do not match.")
     with SessionLocal() as db:
         repository = SQLAlchemyAccessRepository(db)
-        if any(user.role_ids for user in repository.list_users()):
+        if any(user.role_ids for user in repository.list_users() if not user.driver_id):
             parser.error("Access management has already been initialized.")
         role = Role(str(uuid4()), "Administrator", "Built-in platform administrator",
                     sorted(PERMISSIONS), True, ["users:manage", "roles:manage"])
         repository.save_role(role)
         user = repository.get_by_email(email) or User(None, name, email, "")
+        if user.driver_id:
+            parser.error("This email belongs to a linked driver. Use a separate administrator email.")
         user.full_name, user.hashed_password = name, hash_password(password)
         user.status, user.role_ids = "active", [role.id]
         user.failed_logins, user.locked_until = 0, None

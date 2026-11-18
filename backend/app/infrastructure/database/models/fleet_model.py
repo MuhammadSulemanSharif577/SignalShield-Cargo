@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, JSON, String, text
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, JSON, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infrastructure.database.base import Base
@@ -18,6 +18,7 @@ class DriverModel(Base):
     phone: Mapped[str] = mapped_column(String(32), unique=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
     status: Mapped[str] = mapped_column(String(16), default="active")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), unique=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -34,18 +35,6 @@ class VehicleModel(Base):
     device: Mapped[dict | None] = mapped_column(JSON)
     last_location: Mapped[dict | None] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-
-
-class MobileAccountModel(Base):
-    __tablename__ = "mobile_accounts"
-
-    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id", ondelete="CASCADE"), primary_key=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    credential_version: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class JourneyModel(Base):

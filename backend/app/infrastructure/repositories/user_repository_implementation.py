@@ -5,6 +5,7 @@ from app.domain.authentication.entities.user import User
 from app.domain.authentication.interfaces.user_repository import UserRepository
 from app.infrastructure.database.models.user_model import UserModel
 from app.infrastructure.database.models.access_model import user_roles
+from app.infrastructure.database.models.fleet_model import DriverModel
 from app.core.time import aware
 from sqlalchemy import select
 
@@ -58,7 +59,7 @@ class SQLAlchemyUserRepository(UserRepository):
         return self._to_entity(db_user)
 
     def _to_entity(self, db_user: UserModel) -> User:
-
+        driver = self.db.scalar(select(DriverModel).where(DriverModel.user_id == db_user.id))
         return User(
             id=db_user.id,
             full_name=db_user.full_name,
@@ -71,4 +72,7 @@ class SQLAlchemyUserRepository(UserRepository):
             role_ids=list(self.db.scalars(select(user_roles.c.role_id).where(user_roles.c.user_id == db_user.id))),
             failed_logins=db_user.failed_logins,
             locked_until=aware(db_user.locked_until),
+            must_change_password=db_user.must_change_password,
+            driver_id=driver.id if driver else None,
+            driver_status=driver.status if driver else None,
         )

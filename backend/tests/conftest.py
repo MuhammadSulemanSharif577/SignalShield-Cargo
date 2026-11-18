@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.security import hash_password
 from app.domain.authentication.entities.access import Role
 from app.domain.authentication.entities.user import User
-from app.domain.authentication.permissions import PERMISSIONS
+from app.domain.authentication.permissions import DRIVER_ROLE_ID, PERMISSIONS
 from app.infrastructure.database.base import Base
 from app.infrastructure.database.connection import get_db
 from app.infrastructure.repositories.access_repository_implementation import SQLAlchemyAccessRepository
@@ -35,7 +35,14 @@ def db_factory():
             connection.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
-    yield sessionmaker(bind=engine, expire_on_commit=False)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as db:
+        SQLAlchemyAccessRepository(db).save_role(Role(
+            DRIVER_ROLE_ID, "Driver", "Driver account; no staff or fleet-wide access.",
+            ["driver:access"], True, ["driver:access"],
+        ))
+        db.commit()
+    yield factory
     Base.metadata.drop_all(engine)
     engine.dispose()
 

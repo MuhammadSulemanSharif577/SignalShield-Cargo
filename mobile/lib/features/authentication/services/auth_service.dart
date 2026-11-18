@@ -28,17 +28,26 @@ class AuthService {
                 },
               ),
             ) {
-    // Automatically attach JWT to requests when one is stored.
+    // The backend uses opaque bearer tokens, not JWTs.
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
           final token = await _storage.read(key: _tokenKey);
 
-          if (token != null && token.isNotEmpty) {
+          if (options.path != ApiConfig.loginEndpoint &&
+              !options.headers.containsKey('Authorization') &&
+              token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
           }
 
           handler.next(options);
+        },
+        onError: (error, handler) async {
+          if (error.response?.statusCode == 401 &&
+              error.requestOptions.path != ApiConfig.loginEndpoint) {
+            await _storage.delete(key: _tokenKey);
+          }
+          handler.next(error);
         },
       ),
     );
@@ -51,16 +60,24 @@ class AuthService {
   Future<Map<String, dynamic>> signIn({
     required String identifier,
     required String password,
-    required bool keepSessionBound,
   }) async {
     return _postAndStoreToken(
       ApiConfig.loginEndpoint,
       {
-        'identifier': identifier.trim(),
+        'email': identifier.trim(),
         'password': password,
-        'remember_me': keepSessionBound,
       },
     );
+  }
+
+  Future<Map<String, dynamic>> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) {
+    return _postAndStoreToken(ApiConfig.changePasswordEndpoint, {
+      'currentPassword': currentPassword,
+      'newPassword': newPassword,
+    });
   }
 
   // COMMON POST REQUEST + TOKEN STORAGE
@@ -83,7 +100,7 @@ class AuthService {
 
       final responseData = Map<String, dynamic>.from(response.data);
 
-      final token = responseData['access_token'];
+      final token = responseData['token'];
 
       if (token is! String || token.isEmpty) {
         throw const AuthApiException(
@@ -91,7 +108,9 @@ class AuthService {
         );
       }
 
-      // Store JWT securely on the device.
+      await _requireDriver(responseData['user'], token);
+
+      // Password changes rotate the token, so always replace the stored value.
       await _storage.write(
         key: _tokenKey,
         value: token,
@@ -99,7 +118,7 @@ class AuthService {
 
       return responseData;
     } on DioException catch (error) {
-      throw AuthApiException(_getErrorMessage(error));
+      throw AuthApiException(_getErrorMessage(error), statusCode: error.response?.statusCode);
     }
   }
 
@@ -117,9 +136,11 @@ class AuthService {
         );
       }
 
-      return Map<String, dynamic>.from(response.data);
+      final user = Map<String, dynamic>.from(response.data);
+      await _requireDriver(user, await getAccessToken());
+      return user;
     } on DioException catch (error) {
-      throw AuthApiException(_getErrorMessage(error));
+      throw AuthApiException(_getErrorMessage(error), statusCode: error.response?.statusCode);
     }
   }
 
@@ -131,8 +152,31 @@ class AuthService {
 
   // LOGOUT
 
-  Future<void> logout() async {
-    await _storage.delete(key: _tokenKey);
+  Future<void> logout({String? token}) async {
+    try {
+      final bearer = token ?? await getAccessToken();
+      if (bearer != null) {
+        await _dio.post(
+          ApiConfig.logoutEndpoint,
+          options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+        );
+      }
+    } on DioException {
+      // Local sign-out must still work when offline or already expired.
+    } finally {
+      await _storage.delete(key: _tokenKey);
+    }
+  }
+
+  Future<void> _requireDriver(Object? user, String? token) async {
+    final driverId = user is Map ? user['driverId'] : null;
+    if (driverId is String && driverId.trim().isNotEmpty) return;
+    // Reject before saving a new token; also remove any previously saved session.
+    await logout(token: token);
+    throw const AuthApiException(
+      'This app is for driver accounts. Use the web app for staff access.',
+      statusCode: 401,
+    );
   }
 
   // API ERROR HANDLING
@@ -141,6 +185,8 @@ class AuthService {
     final responseData = error.response?.data;
 
     if (responseData is Map) {
+      final message = responseData['message'];
+      if (message is String && message.isNotEmpty) return message;
       final detail = responseData['detail'];
 
       if (detail is String) {
@@ -173,9 +219,10 @@ class AuthService {
 // CUSTOM AUTHENTICATION EXCEPTION
 
 class AuthApiException implements Exception {
-  const AuthApiException(this.message);
+  const AuthApiException(this.message, {this.statusCode});
 
   final String message;
+  final int? statusCode;
 
   @override
   String toString() => message;

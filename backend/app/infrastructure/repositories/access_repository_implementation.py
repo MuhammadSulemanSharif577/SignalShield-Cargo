@@ -29,7 +29,7 @@ class SQLAlchemyAccessRepository(SQLAlchemyUserRepository):
     def save_user(self, user: User) -> User:
         model = self.db.get(UserModel, user.id) if user.id else UserModel()
         for key in ("full_name", "email", "hashed_password", "status",
-                    "last_login", "failed_logins", "locked_until"):
+                    "last_login", "failed_logins", "locked_until", "must_change_password"):
             setattr(model, key, getattr(user, key))
         model.is_active = user.status == "active"
         self.db.add(model)

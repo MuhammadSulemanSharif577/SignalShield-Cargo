@@ -23,3 +23,6 @@ class User:
     role_ids: list[str] = field(default_factory=list)
     failed_logins: int = 0
     locked_until: datetime | None = None
+    must_change_password: bool = False
+    driver_id: str | None = None
+    driver_status: str | None = None

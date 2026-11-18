@@ -27,7 +27,8 @@ def test_session_rotation_revocation_and_current_permissions(client, admin, db_f
     session = result.json()
     assert set(session) == {"token", "expiresAt", "user", "roleNames", "permissions"}
     assert datetime.fromisoformat(session["expiresAt"]).utcoffset() is not None
-    assert session["user"] == {"id": str(user.id), "name": user.full_name, "email": user.email}
+    assert session["user"] == {"id": str(user.id), "name": user.full_name, "email": user.email,
+                               "driverId": None, "mustChangePassword": False}
     assert session["permissions"] == ["users:view"]
     assert session["roleNames"] == ["Changed role"]
     assert session["token"] != token
@@ -82,7 +83,7 @@ def test_user_provisioning_with_initial_password_and_activation(client, admin, d
     result = client.post("/api/v1/users", json=body, headers=headers)
     assert result.status_code == 201, result.text
     user = result.json()
-    assert set(user) == {"id", "name", "email", "roleIds", "status", "lastLogin"}
+    assert set(user) == {"id", "name", "email", "roleIds", "status", "lastLogin", "driverId", "mustChangePassword"}
     assert user["status"] == "pending" and user["lastLogin"] is None
     assert isinstance(user["id"], str)
     with db_factory() as db:

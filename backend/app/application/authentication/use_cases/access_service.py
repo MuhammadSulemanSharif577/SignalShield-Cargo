@@ -17,6 +17,7 @@ from app.core.time import utcnow
 from app.domain.authentication.entities.access import AccessSession, Role
 from app.domain.authentication.entities.user import User
 from app.domain.authentication.interfaces.access_repository import AccessRepository
+from app.domain.authentication.permissions import DRIVER_ROLE_ID
 
 
 def token_digest(token: str) -> str:
@@ -43,7 +44,13 @@ class Principal:
 def user_response(user: User) -> UserResponse:
     return UserResponse(id=str(user.id), name=user.full_name, email=user.email,
                         role_ids=user.role_ids, status=user.status,
-                        last_login=user.last_login)
+                        last_login=user.last_login, driver_id=user.driver_id,
+                        must_change_password=user.must_change_password)
+
+
+def session_user(user: User) -> SessionUser:
+    return SessionUser(id=str(user.id), name=user.full_name, email=user.email,
+                       driver_id=user.driver_id, must_change_password=user.must_change_password)
 
 
 class AccessService:
@@ -57,6 +64,8 @@ class AccessService:
     def _check_status(self, user: User) -> None:
         if user.status != "active":
             raise APIError(403, user.status, f"This account is {user.status}.")
+        if user.driver_id and user.driver_status != "active":
+            raise APIError(403, "inactive", "This driver is deactivated.")
         if user.locked_until and user.locked_until > utcnow():
             raise APIError(403, "locked", "This account is temporarily locked. Please try again later.")
 
@@ -64,10 +73,11 @@ class AccessService:
         digest = token_digest(token)
         session = self.repository.get_session(digest)
         user = self.repository.get_by_id(session.user_id) if session else None
-        if user is None or user.status != "active":
+        if user is None or user.status != "active" or (user.driver_id and user.driver_status != "active"):
             raise APIError(401, "invalid_token", "Invalid, revoked, or expired session.")
         roles = self._roles(user)
-        return Principal(user, digest, {key for role in roles for key in role.permissions}, roles)
+        permissions = set() if user.must_change_password else {key for role in roles for key in role.permissions}
+        return Principal(user, digest, permissions, roles)
 
     def _issue_session(self, user: User, *, record_login: bool = True) -> SessionResponse:
         token = secrets.token_urlsafe(48)
@@ -79,9 +89,9 @@ class AccessService:
         roles = self._roles(user)
         result = SessionResponse(
             token=token, expires_at=expires,
-            user=SessionUser(id=str(user.id), name=user.full_name, email=user.email),
+            user=session_user(user),
             role_names=[role.name for role in roles],
-            permissions=sorted({key for role in roles for key in role.permissions}),
+            permissions=[] if user.must_change_password else sorted({key for role in roles for key in role.permissions}),
         )
         self.repository.commit()
         return result
@@ -121,10 +131,29 @@ class AccessService:
         self.repository.consume_session(principal.token_hash)
         self.repository.commit()
 
+    def change_password(self, principal: Principal, current_password: str, new_password: str) -> SessionResponse:
+        validate_password(new_password)
+        user = self.repository.lock_user(principal.user.id)
+        if user is None or not self.repository.consume_session(principal.token_hash):
+            raise APIError(401, "invalid_token", "Invalid, revoked, or expired session.")
+        self._check_status(user)
+        if not verify_password(current_password, user.hashed_password):
+            raise APIError(422, "invalid_credentials", "The current password is incorrect.")
+        if current_password == new_password:
+            raise APIError(422, "validation", "Choose a different password.")
+        user.hashed_password = hash_password(new_password)
+        user.must_change_password = False
+        user.failed_logins, user.locked_until = 0, None
+        self.repository.save_user(user)
+        self.repository.revoke_user_sessions(user.id)
+        return self._issue_session(user, record_login=False)
+
     def list_users(self) -> list[UserResponse]:
         return [user_response(user) for user in self.repository.list_users()]
 
     def _validate_roles(self, role_ids: list[str]) -> list[str]:
+        if DRIVER_ROLE_ID in role_ids:
+            raise APIError(422, "validation", "Driver accounts are created and assigned their role from the driver profile.")
         for role_id in sorted(set(role_ids)):
             if self.repository.get_role(role_id, lock=True) is None:
                 raise APIError(422, "validation", "One or more assigned roles do not exist.")
@@ -152,6 +181,13 @@ class AccessService:
         if user is None:
             raise APIError(404, "not_found", "User not found.")
         changes = request.model_dump(exclude_unset=True)
+        if user.driver_id:
+            if set(changes) - {"status"}:
+                raise APIError(409, "conflict", "Edit linked driver details and credentials from the driver profile; its Driver role is fixed.")
+            if changes.get("status") == "pending":
+                raise APIError(422, "validation", "Linked driver accounts can only be active or inactive.")
+            if changes.get("status") == "active" and user.driver_status != "active":
+                raise APIError(409, "conflict", "Activate the driver profile before enabling its user account.")
         if user.id == principal.user.id and changes.get("status", user.status) != "active":
             raise APIError(409, "conflict", "You cannot deactivate your own account.")
         if "email" in changes:
@@ -184,6 +220,8 @@ class AccessService:
         return RoleResponse.model_validate(role)
 
     def update_role(self, role_id: str, request: RoleInput, principal: Principal) -> RoleResponse:
+        if role_id == DRIVER_ROLE_ID:
+            raise APIError(409, "conflict", "The built-in Driver role cannot be changed.")
         role = self.repository.get_role(role_id, lock=True)
         if role is None:
             raise APIError(404, "not_found", "Role not found.")

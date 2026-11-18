@@ -23,7 +23,7 @@ class Driver:
     phone: str
     email: str
     status: str = "active"
-    mobile_account: dict | None = None
+    user_account: dict | None = None
     vehicle_id: str | None = None
     updated_at: datetime | None = None
 

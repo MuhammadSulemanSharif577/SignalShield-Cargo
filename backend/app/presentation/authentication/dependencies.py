@@ -25,6 +25,8 @@ def get_current_user(
 
 def require_permissions(*permissions: str):
     def authorize(principal: Principal = Depends(get_current_user)) -> Principal:
+        if principal.user.must_change_password:
+            raise APIError(403, "password_change_required", "Change your temporary password before continuing.")
         if not principal.can(*permissions):
             raise APIError(403, "forbidden", "You do not have permission to perform this operation.")
         return principal

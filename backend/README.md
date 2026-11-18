@@ -67,10 +67,10 @@ loads current role names/permissions. Logout revokes the presented session.
 - Fleet list/detail endpoints require the matching `*:view`; normal changes require
   `*:manage`. Assignable drivers require `drivers:view`.
 - Driver phone numbers require `drivers:manage`; driver emails require
-  `drivers:manage` or `drivers:credentials`. Mobile account metadata and credential
+  `drivers:manage` or `drivers:credentials`. Linked user metadata and credential
   changes require `drivers:credentials`; only create/reset returns a temporary password.
-  Credentials store Argon2 hashes; resets increment `credential_version` to invalidate
-  mobile sessions bound to an earlier credential version.
+  Credentials store Argon2 hashes in `users`; reset, revoke, and driver deactivation
+  invalidate sessions directly.
 - Driver phone numbers are normalized for uniqueness. Driver emails are required,
   trimmed, lowercased, and unique; registrations are uppercase. Receivers and vehicle
   assignments are also unique at the database level.
@@ -81,38 +81,58 @@ loads current role names/permissions. Logout revokes the presented session.
 - Journey histories require journey permissions; alert/incident timelines require
   their corresponding permissions. Locations require `tracking:view`.
 
-### Driver email-based mobile credentials
+### Shared user identities and driver profiles
 
 Register or edit a driver with `{name, phone, email}`. An empty, missing, null, or
 invalid email returns `422 validation`; an email conflict returns `409 conflict`.
 Registration creates only the driver record.
 
-`POST /api/v1/drivers/{id}/credentials` takes **no body** and creates mobile access
-using the saved driver email. It rejects inactive drivers and existing logins.
-Creation and `POST /api/v1/drivers/{id}/credentials/reset-password` return
-`{driver, email, temporaryPassword}`; driver responses use `mobileAccount.email`.
-There is no username field. Reset requires an existing login and rotates its password
-and credential version. `DELETE /api/v1/drivers/{id}/credentials` returns 204 and
-keeps the driver email.
+`users` is the single authentication table for staff and drivers. `drivers.user_id`
+is an optional, unique foreign key to `users.id`; driver records without login
+access have no linked user. `mobile_accounts` is no longer used.
 
-The driver record is the single source of the login email: mobile accounts store
-the driver ID and password hash, not a duplicate email. Editing the driver email
-therefore changes the login identity atomically without changing its password.
-A conflict rolls back the entire edit. Mobile authentication integrations should
-normalize the supplied email, look up `DriverModel.email`, join `MobileAccountModel`
-by driver ID, check driver/account status and password, and enforce
-`must_change_password` and `credential_version`. The admin `/auth/login` endpoint
-remains for web users; this API does not yet expose a mobile session/password-change
-endpoint.
+`POST /api/v1/drivers/{id}/credentials` takes **no body** and creates an active user
+using the saved driver name/email, linking it to the driver and assigning the fixed
+built-in Driver role (`builtin-driver`, permission `driver:access`). That role grants
+no staff or fleet-wide access. It cannot be edited or assigned through staff-user
+creation. Existing user emails produce a conflict; accounts are never silently
+merged or overwritten. The driver must be active and not already linked.
+
+Creation and `POST /api/v1/drivers/{id}/credentials/reset-password` return
+`{driver, email, temporaryPassword}`; driver responses contain
+`userAccount: {id, email, status, mustChangePassword, createdAt, lastLogin}`.
+Reset keeps the same user identity, enables the account, revokes all its sessions,
+and requires a password change. `DELETE /api/v1/drivers/{id}/credentials` returns 204,
+disables the linked user, and revokes sessions; neither record is deleted.
+Use reset to restore access. Deactivating a driver also disables its user;
+reactivating the operational profile does not automatically restore login access.
+
+Both staff and drivers use `POST /api/v1/auth/login` with `{email, password}`.
+The session's `user` includes `driverId` (null for staff) and `mustChangePassword`.
+Temporary-password sessions have no effective permissions and cannot use protected
+operations until `POST /api/v1/auth/change-password` with
+`{currentPassword, newPassword}` succeeds. It returns a rotated session, revokes all
+older sessions, and clears the flag. `GET /api/v1/auth/me` returns the current user's
+own identity and password-change flag. Driver operational/mobile endpoints remain
+future work and must enforce ownership, not grant fleet-wide permissions.
+
+User list responses include `driverId` and `mustChangePassword`, so linked accounts
+appear in the same directory as staff. Change linked names/emails from the driver
+profile; the user identity is synchronized atomically and email changes revoke
+sessions without changing the password. Linked roles are fixed; Users can change
+their active/inactive login status only, and cannot activate a deactivated driver.
 
 **Existing databases:** back up the database and run `alembic upgrade head`.
-Migration `0003_driver_email_login` validates and normalizes all driver emails
-before making changes. It stops with the affected driver IDs if any email is missing,
-invalid, or duplicated after normalization; correct those records and rerun.
-It removes legacy mobile usernames, preserves password hashes and account metadata,
-and increments credential versions to require mobile reauthentication.
-Update mobile clients/integrations to use email before deploying this breaking change.
-Downgrade cannot recover old usernames; it assigns random unique legacy usernames.
+Migration `0003_driver_email_login` validates/normalizes driver emails and removes
+legacy usernames. Migration `0004_unified_driver_users` moves existing password hashes,
+creation/login timestamps, temporary-password flags, and effective account status
+into linked users before removing `mobile_accounts`. Drivers without credentials
+remain unlinked. User email collisions and a conflicting Driver role ID/name stop
+the migration before its changes; resolve them explicitly and rerun.
+Downgrading recreates legacy credentials but keeps unified user identities to avoid
+data loss; upgrading again may require resolving those duplicate identities.
+Legacy credential versions are replaced by revocable shared sessions. Mobile client
+integration is a separate follow-up; `mobile/` has not been changed.
 
 ## Dashboard data
 
